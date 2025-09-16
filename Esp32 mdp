@@ -1,0 +1,98 @@
+#include <SPI.h>
+#include <MFRC522.h>
+
+#define RST_PIN  22
+#define SS_PIN   5
+
+MFRC522 mfrc522(SS_PIN, RST_PIN); 
+
+// --- Cards list (same order as training in Python) ---
+String cards[] = {
+  "06 0E 7F 40",
+  "36 08 07 4E",
+  "56 1D 12 4E",
+  "96 E8 1B 4E",
+  "83 4D 82 A9",
+  "10 EC 43 14",
+  "96 34 81 5F",
+  "96 DB 58 5F",
+  "86 07 18 4E",
+  "D6 54 7B 5F"
+};
+const int N_STATES = sizeof(cards) / sizeof(cards[0]);
+
+// --- Q-table here ---
+const float Q[15][2] = {
+  {40.000, 50.000},  
+  {40.000, 50.000}, 
+  {40.000, 50.000},
+  {40.000, 50.000},
+  {40.000, 50.000},
+  {50.000, 35.000},
+  {50.000, 35.000},
+  {50.000, 35.000},
+  {50.000, 35.000},
+  {50.000, 35.000}
+};
+
+// --- Helper functions ---
+String getUIDString(MFRC522::Uid *uid) {
+  String uidString = "";
+  for (byte i = 0; i < uid->size; i++) {
+    if (uid->uidByte[i] < 0x10) uidString += "0";
+    uidString += String(uid->uidByte[i], HEX);
+    if (i < uid->size - 1) uidString += " ";
+  }
+  uidString.toUpperCase();
+  return uidString;
+}
+
+int findStateIndex(String uid) {
+  for (int i = 0; i < N_STATES; i++) {
+    if (cards[i] == uid) return i;
+  }
+  return -1; // unknown card
+}
+
+// --- Setup ---
+void setup() {
+  Serial.begin(115200);
+  SPI.begin();
+  mfrc522.PCD_Init();
+  randomSeed(analogRead(0));  // randomness
+  Serial.println("Place your card near the reader...");
+}
+
+// --- Main loop ---
+void loop() {
+  if (!mfrc522.PICC_IsNewCardPresent()) return;
+  if (!mfrc522.PICC_ReadCardSerial()) return;
+
+  String uid = getUIDString(&(mfrc522.uid));
+  Serial.print("Scanned UID: ");
+  Serial.println(uid);
+
+  int state = findStateIndex(uid);
+  if (state == -1) {
+    Serial.println("⚠️ Unknown card, rejecting by default.");
+  } else {
+    int action;
+    if (Q[state][0] == 0.000 && Q[state][1] == 0.000) {
+      // if 0.000 both values pick random 0 or 1
+      action = random(0, 2);  
+      Serial.println("ℹ️ Q-values empty, choosing randomly...");
+    } else {
+      // Normal decision: pick action with higher Q-value
+      action = (Q[state][1] > Q[state][0]) ? 1 : 0;
+    }
+
+    if (action == 1) {
+      Serial.println("✅ Authorized");
+    } else {
+      Serial.println("❌ Rejected");
+    }
+  }
+
+  mfrc522.PICC_HaltA();
+  mfrc522.PCD_StopCrypto1();
+}
